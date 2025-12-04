@@ -6,7 +6,7 @@ import scala.collection.parallel.ParSeq
 
 package object ItinerariosPar {
   def itinerariosPar(vuelos: List[Vuelo], aeropuertos: List[Aeropuerto]):
-  (String, String) => List[Itinerario] = {
+    (String, String) => List[Itinerario] = {
 
     val adj = vuelos.groupBy(_.Org)
 
@@ -49,35 +49,95 @@ package object ItinerariosPar {
     (c1, c2) => buscar(c1, c2, Set(), Nil)
   }
 
-  def itinerarioSalidaPar(vuelos: List[Vuelo], aeropuertos: List[Aeropuerto]):
-  (String, String, Int, Int) => Itinerario = {
+  def itinerariosTiempoPar(vuelos: List[Vuelo], aeropuertos: List[Aeropuerto]): (String, String) => List[Itinerario] = {
 
-    val aeromap = aeropuertos.map(a => (a.Cod, a)).toMap
-    val itsPar = itinerariosPar(vuelos, aeropuertos)
+    val itsFun: (String, String) => List[Itinerario] =
+      itinerariosPar(vuelos, aeropuertos)
 
-    def llegadaUTC(v: Vuelo): Int =
-      v.HL*60 + v.ML - aeromap(v.Dst).GMT
+    def toMinutes(h: Int, m: Int): Int = h * 60 + m
 
-    def salidaUTC(v: Vuelo): Int =
-      v.HS*60 + v.MS - aeromap(v.Org).GMT
+    def tiempoTotal(it: Itinerario): Int = {
+      val inicio = toMinutes(it.head.HS, it.head.MS)
+      val fin = toMinutes(it.last.HL, it.last.ML)
+      fin - inicio
+    }
 
-    def llegadaIt(it: Itinerario): Int = llegadaUTC(it.last)
-    def salidaIt(it: Itinerario): Int = salidaUTC(it.head)
+    val UMBRAL = 50
 
-    (c1, c2, h, m) => {
-      val citaUTC = h*60 + m - aeromap(c2).GMT
+    // Construimos la lista de tuplas usando for/yield
+    def tiemposPar(itins: List[Itinerario]): List[(Itinerario, Int)] = {
+      if (itins.length <= UMBRAL) {
+        for (it <- itins) yield (it, tiempoTotal(it))
+      } else {
+        val (izq, der) = itins.splitAt(itins.length / 2)
+        val (tiemposIzq, tiemposDer) = parallel(
+          tiemposPar(izq),
+          tiemposPar(der)
+        )
+        tiemposIzq ::: tiemposDer
+      }
+    }
 
-      val its = itsPar(c1, c2).par       // paralelismo en datos
+    def mejoresTres(conTiempos: List[(Itinerario, Int)]): List[Itinerario] = {
+      if (conTiempos.length <= UMBRAL) {
+        val ordenados = for (t <- conTiempos) yield t
+        ordenados.sortBy(_._2).take(3).map(_._1)
+      } else {
+        val (izq, der) = conTiempos.splitAt(conTiempos.length / 2)
+        val (mejoresIzq, mejoresDer) = parallel(
+          izq.sortBy(_._2).take(3),
+          der.sortBy(_._2).take(3)
+        )
+        (mejoresIzq ::: mejoresDer).sortBy(_._2).take(3).map(_._1)
+      }
+    }
 
-      val posibles = its.filter(it => llegadaIt(it) <= citaUTC)
-
-      if (posibles.isEmpty) Nil
-      else posibles.maxBy(salidaIt)
+    (c1: String, c2: String) => {
+      val todos: List[Itinerario] = itsFun(c1, c2)
+      if (todos.isEmpty) Nil
+      else {
+        val conTiempos = tiemposPar(todos)
+        mejoresTres(conTiempos)
+      }
     }
   }
 
+  def itinerariosEscalasPar(vuelos: List[Vuelo], aeropuertos: List[Aeropuerto]): (String, String) => List[Itinerario] = {
+    (cod1: String, cod2: String) => {
+      val umbral = 50;
 
+      def contarEscalas(itinerario: Itinerario): Int =
+        itinerario match {
+        case Nil => Int.MaxValue
+        case _ => itinerario.length - 1 + itinerario.map(_.Esc).sum
+      }
 
+      val todosItinerarios = itinerariosPar(vuelos, aeropuertos)(cod1, cod2)
+
+      if (todosItinerarios.length >= umbral) {
+        // TASK PARALLELISM: Dividir en tareas independientes
+        val mitad = todosItinerarios.length / 2
+        val (parte1, parte2) = todosItinerarios.splitAt(mitad)
+
+        // Crear dos tareas que se ejecutan en paralelo
+        val (evaluados1, evaluados2) = parallel(
+          parte1.map(it => (it, contarEscalas(it))),  // Tarea 1
+          parte2.map(it => (it, contarEscalas(it)))   // Tarea 2
+        )
+
+        // Combinar resultados
+        val evaluados = evaluados1 ++ evaluados2
+
+        evaluados.sortBy(_._2).take(3).map(_._1)
+
+      } else {
+        // Secuencial
+        //todosItinerarios.map(it => (it, contarEscalas(it))).sortBy(._2).take(3).map(._1)
+        val itinerariosOrdenados = todosItinerarios.sortBy(it => contarEscalas(it))
+        itinerariosOrdenados.take(3)
+      }
+    }
+  }
 
   def itinerariosAirePar(vuelos: List[Vuelo], aeropuertos: List[Aeropuerto]): (String, String) => List[Itinerario] = {
 
@@ -104,16 +164,12 @@ package object ItinerariosPar {
     def tiempoAire(it: Itinerario): Int =
       it.map(duracionVuelo).sum
 
-    // ===== UMBRAL: evita overhead en listas pequeñas =====
     val UMBRAL = 50
 
-    // ===== Paralelismo de tareas: calculamos (itinerario, tiempoAire) en paralelo =====
     def tiemposPar(itins: List[Itinerario]): List[(Itinerario, Int)] = {
-      // Si la lista es pequeña o tiene 1 elemento, procesar secuencialmente
       if (itins.length <= UMBRAL) {
         itins.map(it => (it, tiempoAire(it)))
       } else {
-        // Dividir en dos mitades y procesar en paralelo
         val (izq, der) = itins.splitAt(itins.length / 2)
         val (tiemposIzq, tiemposDer) = parallel(
           tiemposPar(izq),
@@ -123,13 +179,10 @@ package object ItinerariosPar {
       }
     }
 
-    // ===== Encontrar los 3 mejores de forma más eficiente =====
     def mejoresTres(conTiempos: List[(Itinerario, Int)]): List[Itinerario] = {
       if (conTiempos.length <= UMBRAL) {
-        // Caso base: ordenar secuencialmente
         conTiempos.sortBy(_._2).take(3).map(_._1)
       } else {
-        // Dividir, encontrar mejores de cada lado en paralelo
         val (izq, der) = conTiempos.splitAt(conTiempos.length / 2)
 
         val (mejoresIzq, mejoresDer) = parallel(
@@ -137,27 +190,45 @@ package object ItinerariosPar {
           der.sortBy(_._2).take(3)
         )
 
-        // Combinar y seleccionar los 3 mejores globales
         (mejoresIzq ::: mejoresDer).sortBy(_._2).take(3).map(_._1)
       }
     }
 
-    // Función expuesta al exterior
     (c1: String, c2: String) => {
       val todos: List[Itinerario] = itsFun(c1, c2)
 
       if (todos.isEmpty) Nil
       else {
-        // Calculamos tiempos en paralelo
         val conTiempos: List[(Itinerario, Int)] = tiemposPar(todos)
-
-        // Encontramos los 3 mejores (también puede ser en paralelo)
         mejoresTres(conTiempos)
       }
     }
   }
 
+  def itinerarioSalidaPar(vuelos: List[Vuelo], aeropuertos: List[Aeropuerto]):
+    (String, String, Int, Int) => Itinerario = {
 
+    val aeromap = aeropuertos.map(a => (a.Cod, a)).toMap
+    val itsPar = itinerariosPar(vuelos, aeropuertos)
 
+    def llegadaUTC(v: Vuelo): Int =
+      v.HL*60 + v.ML - aeromap(v.Dst).GMT
 
+    def salidaUTC(v: Vuelo): Int =
+      v.HS*60 + v.MS - aeromap(v.Org).GMT
+
+    def llegadaIt(it: Itinerario): Int = llegadaUTC(it.last)
+    def salidaIt(it: Itinerario): Int = salidaUTC(it.head)
+
+    (c1, c2, h, m) => {
+      val citaUTC = h*60 + m - aeromap(c2).GMT
+
+      val its = itsPar(c1, c2).par       // paralelismo en datos
+
+      val posibles = its.filter(it => llegadaIt(it) <= citaUTC)
+
+      if (posibles.isEmpty) Nil
+      else posibles.maxBy(salidaIt)
+    }
+  }
 }

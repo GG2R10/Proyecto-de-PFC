@@ -1,10 +1,5 @@
-
+import Datos._
 package object Itinerarios {
-  //importamos el paquete datos para usar nuestros case / type
-  import Datos._
-
-  //Funciones de Sebastian:
-  //Funcion Itinerarios (funcionamiento exitoso)
   def itinerarios(vuelos: List[Vuelo], aeropuertos: List[Aeropuerto]): (String, String) => List[Itinerario] = {
     val adj: Map[String, List[Vuelo]] =
       vuelos.groupBy(_.Org)
@@ -13,7 +8,6 @@ package object Itinerarios {
       if (Org == Dst) List(actual)
       else
         adj.find(_._1 == Org).fold(Nil: List[Vuelo])(_._2)
-        //adj.getOrElse(Org, Nil)
           .filter(v => !visitados.contains(v.Dst))
           .flatMap { v =>
             val nuevosVisitados = visitados + v.Org
@@ -23,6 +17,71 @@ package object Itinerarios {
     }
 
     (c1, c2) => buscar(c1, c2, Set(), Nil)
+  }
+
+  def itinerariosTiempo(vuelos: List[Vuelo], aeropuertos: List[Aeropuerto]): (String, String) => List[Itinerario] = {
+
+    def toMinutes(h: Int, m: Int): Int = h * 60 + m
+
+    def tiempoTotal(it: Itinerario): Int = {
+      val salida = it.head
+      val llegada = it.last
+      toMinutes(llegada.HL, llegada.ML) - toMinutes(salida.HS, salida.MS)
+    }
+
+    (c1: String, c2: String) => {
+      val todos = itinerarios(vuelos, aeropuertos)(c1, c2)
+      val conTiempos: List[(Itinerario, Int)] = for (it <- todos) yield (it, tiempoTotal(it))
+
+      conTiempos.sortBy(_._2).take(3).map(_._1)
+    }
+  }
+
+  def itinerariosEscalas(vuelos: List[Vuelo], aeropuertos: List[Aeropuerto]): (String, String) => List[Itinerario] = {
+    (cod1: String, cod2: String) => {
+
+      // Función auxiliar para contar el número total de escalas
+      def contarEscalas(itinerario: Itinerario): Int = {
+        itinerario match {
+          case Nil => Int.MaxValue
+          case _ => itinerario.length - 1 + itinerario.map(_.Esc).sum
+        }
+      }
+
+      val todosItinerarios = itinerarios(vuelos, aeropuertos)(cod1, cod2)
+      val itinerariosOrdenados = todosItinerarios.sortBy(it => contarEscalas(it))
+      itinerariosOrdenados.take(3)
+    }
+  }
+
+  def itinerariosAire(vuelos: List[Vuelo], aeropuertos: List[Aeropuerto]): (String, String) => List[Itinerario] = {
+    val itsFun: (String, String) => List[Itinerario] =
+      itinerarios(vuelos, aeropuertos)
+
+    val aeropuertosPorCod: Map[String, Aeropuerto] =
+      aeropuertos.map(a => a.Cod -> a).toMap
+
+    def minutosUTC(cod: String, h: Int, m: Int): Int =
+      h * 60 + m - (aeropuertosPorCod(cod).GMT)
+
+    def duracionVuelo(v: Vuelo): Int = {
+      val salidaUTC       = minutosUTC(v.Org, v.HS, v.MS)
+      val llegadaUTCBruta = minutosUTC(v.Dst, v.HL, v.ML)
+
+      val llegadaUTC =
+        if (llegadaUTCBruta < salidaUTC) llegadaUTCBruta + 24 * 60
+        else llegadaUTCBruta
+
+      llegadaUTC - salidaUTC
+    }
+
+    def tiempoAire(it: Itinerario): Int =
+      it.map(duracionVuelo).sum
+
+    (c1: String, c2: String) => {
+      val todos: List[Itinerario] = itsFun(c1, c2)
+      todos.sortBy(tiempoAire).take(3)
+    }
   }
 
   def itinerarioSalida(vuelos: List[Vuelo], aeropuertos: List[Aeropuerto]): (String, String, Int, Int) => Itinerario = {
@@ -52,58 +111,4 @@ package object Itinerarios {
       else posibles.maxBy(salidaIt)
     }
   }
-  //Final de funciones de sebastian ----------------------------------------------
-
-
-
-  //Mis funciones---------------------------------------------------------------
-  def itinerariosAire(vuelos: List[Vuelo], aeropuertos: List[Aeropuerto]): (String, String) => List[Itinerario] = {
-    //Se usa la funcion de sabestian, para poder generar los itinerarios posibles.
-    val itsFun: (String, String) => List[Itinerario] =
-      itinerarios(vuelos, aeropuertos)
-
-    // Mapa código -> aeropuerto para obtener GMT rápidamente
-    val aeropuertosPorCod: Map[String, Aeropuerto] =
-      aeropuertos.map(a => a.Cod -> a).toMap
-
-    // Convierte hora local (h, m) de un aeropuerto en minutos UTC
-    def minutosUTC(cod: String, h: Int, m: Int): Int =
-      h * 60 + m - (aeropuertosPorCod(cod).GMT)
-
-    //Org == Cod
-    // Duración EN AIRE de un vuelo, en minutos
-    // Usamos SOLO horarios + GMT, ignoramos Esc
-    def duracionVuelo(v: Vuelo): Int = {
-      val salidaUTC       = minutosUTC(v.Org, v.HS, v.MS)
-      val llegadaUTCBruta = minutosUTC(v.Dst, v.HL, v.ML)
-
-      //Si la llegada en UTC queda "antes" que la salida,
-      //se asume q el vuelo llega al día siguiente (+24h)
-      //es IMPOSIBLE que en UTC llegada<salida sin que pase la medianoche
-      //es decir, si vemos este fenomeno, necesariamente cambio de dia
-      val llegadaUTC =
-        if (llegadaUTCBruta < salidaUTC) llegadaUTCBruta + 24 * 60
-        else llegadaUTCBruta
-
-      llegadaUTC - salidaUTC
-    }
-
-    // Tiempo total en aire de un itinerario = suma de las duraciones de sus vuelos
-    def tiempoAire(it: Itinerario): Int =
-      it.map(duracionVuelo).sum
-
-    // Función que se expone al exterior
-    (c1: String, c2: String) => {
-      val todos: List[Itinerario] = itsFun(c1, c2)
-      todos.sortBy(tiempoAire).take(3)
-    }
-  }
-
-
-
-
-
-
-
-
 }
