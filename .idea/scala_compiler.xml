@@ -2,8 +2,8 @@
 <project version="4">
   <component name="ScalaCompilerConfiguration">
     <option name="separateProdTestSources" value="true" />
-    <profile name="sbt 1" modules="FinalFPFCv1" />
-    <profile name="sbt 2" modules="FinalFPFCv1.main,FinalFPFCv1.test">
+    <profile name="sbt 1" modules="FinalFPFCv1,Taller Paralelismo de Datos 2024-II" />
+    <profile name="sbt 2" modules="FinalFPFCv1.main,FinalFPFCv1.test,Taller Paralelismo de Datos 2024-II.main,Taller Paralelismo de Datos 2024-II.test">
       <option name="implicitConversions" value="true" />
       <option name="deprecationWarnings" value="true" />
     </profile>

@@ -1,9 +1,9 @@
 ThisBuild / version := "0.1.0-SNAPSHOT"
-ThisBuild / scalaVersion := "2.13.12"
+ThisBuild / scalaVersion := "2.13.16"
 
 lazy val root = (project in file("."))
   .settings(
-    name := "FinalFPFCv1",
+    name := "Taller Paralelismo de Datos 2024-II",
     scalacOptions ++= Seq("-language:implicitConversions", "-deprecation"),
     libraryDependencies ++= Seq(
       "com.storm-enroute" %% "scalameter-core" % "0.21",
