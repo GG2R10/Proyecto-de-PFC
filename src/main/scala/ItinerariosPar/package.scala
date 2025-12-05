@@ -13,7 +13,7 @@ package object ItinerariosPar {
     def buscar(Org: String, Dst: String, visitados: Set[String], actual: Itinerario): List[Itinerario] = {
       if (Org == Dst) List(actual)
       else {
-        val siguiente = adj.getOrElse(Org, Nil).filter(v => !visitados.contains(v.Dst))
+        val siguiente = adj.find(_._1 == Org).map(_._2).fold(Nil: List[Vuelo])(_.filter(v => !visitados.contains(v.Dst)))
 
         siguiente match {
           case Nil =>
